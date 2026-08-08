@@ -1,0 +1,21 @@
+# Vivado generated files
+*.jou
+*.log
+*.str
+*.zip
+
+# Project-specific runs and simulation data
+dualclk_async_fifo.sim/
+dualclk_async_fifo.runs/
+dualclk_async_fifo.cache/
+dualclk_async_fifo.hw/
+dualclk_async_fifo.ip_user_files/
+.Xil/
+
+# IP cache
+.ipcache/
+
+# Generated bitstreams and reports (optional to keep — remove these lines if you want them versioned)
+*.bit
+*.mem
+*.dcp
