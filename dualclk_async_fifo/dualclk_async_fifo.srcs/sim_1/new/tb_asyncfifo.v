@@ -18,8 +18,8 @@
 //// Additional Comments:
 //// 
 ////////////////////////////////////////////////////////////////////////////////////
-// tb_asyncfifo_all_cases
-// Combined stress testbench - all 8 corner cases in one file, sequentially:
+
+//   all 8 corner cases
 //   1. Simultaneous read+write at FULL
 //   2. Simultaneous read+write at EMPTY
 //   3. Full -> empty -> full, repeated (pointer wraparound x4)
@@ -30,27 +30,13 @@
 //   7. Back-to-back max-rate writes (no idle cycles)
 //   8. Single-entry FIFO edge case
 //
-// Timing techniques used throughout (all validated during individual
-// per-case debugging against real Vivado/xsim runs):
-//   - All DUT-input driving uses NONBLOCKING (<=) assignments, never
-//     blocking, to avoid same-edge scheduling races with monitors/DUT.
-//   - Reads are checked BEFORE popping (r_data is valid for the CURRENT
-//     front item before r_incr advances the pointer at the next edge).
-//   - Burst/oversubscribed writes (case 6, 7) use a COUNT-ONLY monitor
-//     (no per-value prediction, which is race-prone) plus a drain-side
-//     check for gap-free consecutive values instead of exact absolute
-//     value prediction.
-//   - Cases with a controlled, non-oversubscribed fill (case 3) record
-//     expected values directly in the SAME process/iteration as the
-//     write, which is safe (no cross-process race).
-//////////////////////////////////////////////////////////////////////////////////
 module tb_asyncfifo;
 
   parameter DATA_SIZE = 8;
   parameter ADDR_SIZE = 4;
   localparam DEPTH = (1 << ADDR_SIZE);
 
-  // real, so Case 6 can reconfigure clock speeds mid-simulation
+
   real WCLK_PERIOD = 10;
   real RCLK_PERIOD = 25;
 
@@ -89,16 +75,12 @@ module tb_asyncfifo;
   always #(WCLK_PERIOD/2) w_clk = ~w_clk;
   always #(RCLK_PERIOD/2) r_clk = ~r_clk;
 
-  // Count-only write monitor - used by Case 6 / Case 7 burst sections.
-  // Deliberately does NOT try to predict/store the exact value written
-  // (that requires cross-process value capture, which raced in testing).
   always @(posedge w_clk) begin
     if (w_rstn && w_incr && !w_full) begin
       accepted_count = accepted_count + 1;
     end
   end
 
-  // ---------------- shared tasks ----------------
 
   task reset_both;
     begin
@@ -112,7 +94,6 @@ module tb_asyncfifo;
     end
   endtask
 
-  // Single-word write, nonblocking, safe for isolated (non-burst) writes.
   task single_write(input [DATA_SIZE-1:0] data);
     begin
       @(posedge w_clk);
@@ -123,7 +104,6 @@ module tb_asyncfifo;
     end
   endtask
 
-  // Single-word check-before-pop read against a known expected value.
   task check_read(input [DATA_SIZE-1:0] expected);
     begin
       while (r_empty) @(posedge r_clk);
@@ -152,18 +132,15 @@ module tb_asyncfifo;
     end
   endtask
 
-  // ================================================================
-  // Main stimulus - all 8 cases, sequentially
-  // ================================================================
+
   initial begin
     $dumpfile("tb_asyncfifo.vcd");
     $dumpvars(0, tb_asyncfifo);
 
     reset_both;
 
-    // ============================================================
     // CASE 8: single-entry edge case
-    // ============================================================
+
     $display("\n===== CASE 8: single-entry write/read =====");
     check(r_empty, "FIFO starts empty");
     single_write(8'h7E);
@@ -173,9 +150,9 @@ module tb_asyncfifo;
     #(RCLK_PERIOD*3);
     check(r_empty, "r_empty reasserts after draining the single entry");
 
-    // ============================================================
+
     // CASE 7: back-to-back max-rate writes (no idle cycles), well past DEPTH
-    // ============================================================
+
     $display("\n===== CASE 7: back-to-back max-rate write, full FIFO =====");
     reset_both;
     w_data <= data_counter[DATA_SIZE-1:0]; // prime the FIRST value before the burst starts
@@ -212,17 +189,16 @@ module tb_asyncfifo;
     #(RCLK_PERIOD*3);
     check(r_empty, "FIFO empty after draining all DEPTH items, gap-free sequence confirmed");
 
-    // ============================================================
     // CASE 1: simultaneous read+write at FULL
-    // ============================================================
+    
     $display("\n===== CASE 1: simultaneous read+write at FULL =====");
     reset_both;
-    w_data <= data_counter[DATA_SIZE-1:0]; // prime the FIRST value before the burst starts
+    w_data <= data_counter[DATA_SIZE-1:0]; 
     data_counter = data_counter + 1;
     w_incr <= 1'b1;
     for (i = 0; i < DEPTH; i = i + 1) begin
       @(posedge w_clk);
-      w_data <= data_counter[DATA_SIZE-1:0]; // prime the NEXT value for the FOLLOWING edge
+      w_data <= data_counter[DATA_SIZE-1:0];
       data_counter = data_counter + 1;
     end
     @(posedge w_clk);
@@ -236,7 +212,7 @@ module tb_asyncfifo;
         for (k = 0; k < 5; k = k + 1) begin
           @(posedge w_clk);
           w_incr <= 1'b1;
-          w_data <= data_counter[DATA_SIZE-1:0]; // poison - must never land while full
+          w_data <= data_counter[DATA_SIZE-1:0];
           data_counter = data_counter + 1;
         end
         @(posedge w_clk);
@@ -254,7 +230,6 @@ module tb_asyncfifo;
     #(WCLK_PERIOD*5);
     check(!w_full, "w_full deasserted after concurrent read freed a slot");
 
-    // drain whatever remains, just confirming no overflow (<= DEPTH total)
     begin : drain1
       integer cnt;
       cnt = 0;
@@ -268,9 +243,8 @@ module tb_asyncfifo;
       check(cnt <= DEPTH, "no overflow: never drained more than DEPTH items");
     end
 
-    // ============================================================
     // CASE 3: full -> empty -> full, repeated x4 (wraparound)
-    // ============================================================
+
     $display("\n===== CASE 3: repeated full-drain-fill cycles (wraparound) =====");
     reset_both;
     begin : wrap3
@@ -280,7 +254,7 @@ module tb_asyncfifo;
           @(posedge w_clk);
           w_incr <= 1'b1;
           w_data <= data_counter[DATA_SIZE-1:0];
-          expect_q[q_tail] = data_counter[DATA_SIZE-1:0]; // safe: same process/iteration
+          expect_q[q_tail] = data_counter[DATA_SIZE-1:0]; 
           q_tail = q_tail + 1;
           data_counter = data_counter + 1;
         end
@@ -307,9 +281,8 @@ module tb_asyncfifo;
       end
     end
 
-    // ============================================================
     // CASE 2: simultaneous read+write at EMPTY
-    // ============================================================
+
     $display("\n===== CASE 2: simultaneous read+write at EMPTY =====");
     reset_both;
     check(r_empty, "FIFO starts empty before Case 2");
@@ -330,9 +303,8 @@ module tb_asyncfifo;
     #(RCLK_PERIOD*3);
     check(r_empty, "empty again after draining, no phantom item from bogus read");
 
-    // ============================================================
     // CASE 4: reset asserted mid-transfer
-    // ============================================================
+
     $display("\n===== CASE 4: reset mid-transfer =====");
     reset_both;
     for (i = 0; i < 5; i = i + 1) begin
@@ -356,9 +328,8 @@ module tb_asyncfifo;
     #(RCLK_PERIOD*3);
     check(r_empty, "clean drain after reset-recovery write");
 
-    // ============================================================
     // CASE 5: asymmetric reset (write side only)
-    // ============================================================
+
     $display("\n===== CASE 5: asymmetric reset (write side only) =====");
     reset_both;
     single_write(8'h11);
@@ -378,24 +349,23 @@ module tb_asyncfifo;
     check(!r_empty, "write visible after w_rstn recovery");
     check_read(8'h3C);
 
-    // ============================================================
     // CASE 6a: extreme ratio - fast write / slow read (25:1)
-    // ============================================================
+    
     $display("\n===== CASE 6a: fast write (10ns) / slow read (250ns) =====");
     WCLK_PERIOD = 10;
     RCLK_PERIOD = 250;
     reset_both;
-    w_data <= data_counter[DATA_SIZE-1:0]; // prime the FIRST value before the burst starts
+    w_data <= data_counter[DATA_SIZE-1:0]; 
     data_counter = data_counter + 1;
     w_incr <= 1'b1;
     for (i = 0; i < DEPTH + 4; i = i + 1) begin
       @(posedge w_clk);
-      w_data <= data_counter[DATA_SIZE-1:0]; // prime the NEXT value for the FOLLOWING edge
+      w_data <= data_counter[DATA_SIZE-1:0]; 
       data_counter = data_counter + 1;
     end
     @(posedge w_clk);
     w_incr <= 1'b0;
-    #(RCLK_PERIOD*3); // scaled to the SLOWER clock this time
+    #(RCLK_PERIOD*3); 
     check(w_full, "fast writer fills, held at full by slow reader");
     check(accepted_count == DEPTH, "exactly DEPTH writes accepted despite 25:1 ratio burst");
 
@@ -410,9 +380,8 @@ module tb_asyncfifo;
     #(RCLK_PERIOD*2);
     check(r_empty, "slow reader eventually drains fully, no data lost");
 
-    // ============================================================
     // CASE 6b: extreme ratio - slow write / fast read
-    // ============================================================
+    
     $display("\n===== CASE 6b: slow write (250ns) / fast read (10ns) =====");
     WCLK_PERIOD = 250;
     RCLK_PERIOD = 10;
@@ -456,7 +425,7 @@ module tb_asyncfifo;
     $finish;
   end
 
-  // watchdog
+
   initial begin
     #2000000;
     $display("[%0t] WATCHDOG TIMEOUT", $time);
