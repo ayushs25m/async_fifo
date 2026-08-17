@@ -1,0 +1,29 @@
+Here's the full rundown of cases 1–8, what each tests and why it matters:
+
+**Case 1 — Simultaneous read+write at FULL**
+Overlap a write attempt with a read on the opposite domain while `w_full=1`. Tests that the pessimistic (lagging) synchronized read pointer never lets a write sneak past capacity, and that `w_full` only deasserts after the *real* synchronizer latency once a read has actually freed a slot — not early, not late enough to overflow.
+
+**Case 2 — Simultaneous read+write at EMPTY**
+Overlap a read attempt with a fresh write while `r_empty=1`. Tests that `r_incr & ~r_empty` gating correctly blocks the read pointer from advancing on a phantom read — no garbage data should surface, and no pointer corruption from a read that shouldn't have counted.
+
+**Case 3 — Full → empty → full, repeated (pointer wraparound)**
+Fill completely, drain completely, repeat 3×. This exercises the Gray-code pointer wrapping past `all-1s → 0` multiple times, and re-validates that the full-flag's MSB-invert comparison (`{~wq2_r_ptr[MSB:MSB-1], wq2_r_ptr[MSB-2:0]}`) still correctly detects "wrapped around" on the second and third wrap, not just the first.
+
+**Case 4 — Reset asserted mid-transfer**
+Yank both `w_rstn` and `r_rstn` low while writes are actively in flight and values are mid-flight inside the 2-flop synchronizers. Tests clean recovery: both domains must come back with `r_empty=1`, `w_full=0`, no stale synchronizer garbage causing a false flag on the first post-reset cycle.
+
+**Case 5 — Asymmetric reset (write side only)**
+Reset only `w_rstn`, leave `r_rstn` high throughout. Real systems often don't reset both domains in lockstep. Tests that the un-reset read domain doesn't glitch or corrupt just because the other domain's counters got wiped underneath it.
+
+**Case 6a/6b — Extreme clock ratio (both directions)**
+Run write 20× faster than read, then reverse it. Tests that synchronizer latency (a fixed 2-cycle delay in whichever domain is being crossed *into*) doesn't cause overflow when one side vastly outpaces the other's ability to signal full/empty in time — throughput may be conservative, but correctness must hold at any ratio.
+
+**Case 7 — Back-to-back max-rate writes (no idle cycles)**
+Hold `w_incr` high every cycle past the FIFO's actual depth. Tests no off-by-one in the address/pointer increment logic, and that excess writes past full are cleanly ignored rather than wrapping into occupied memory.
+
+**Case 8 — Single-entry edge case**
+Write exactly one word, then immediately verify `r_empty` deasserts correctly (after sync latency); read it, verify `r_empty` reasserts. This is the minimum-viable boundary test — smallest possible occupancy, most sensitive to any off-by-one in the full/empty comparison logic.
+
+**Not covered (from the original list of 10), and why:**
+- **9. Metastability injection** — not a functional-sim concern; this needs gate-level/SDF timing simulation or static MTBF analysis on the synchronizer flops, since metastability is a physical/timing phenomenon, not a logic bug.
+- **10. Almost-full/almost-empty threshold accuracy** — doesn't apply yet, since your current design doesn't implement programmable almost-full/almost-empty flags. Worth revisiting once you add that logic, since threshold correctness there needs to account for synchronizer lag explicitly (a naive comparison would be off by the sync latency).
