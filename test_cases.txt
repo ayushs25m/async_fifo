@@ -23,7 +23,3 @@ Hold `w_incr` high every cycle past the FIFO's actual depth. Tests no off-by-one
 
 **Case 8 — Single-entry edge case**
 Write exactly one word, then immediately verify `r_empty` deasserts correctly (after sync latency); read it, verify `r_empty` reasserts. This is the minimum-viable boundary test — smallest possible occupancy, most sensitive to any off-by-one in the full/empty comparison logic.
-
-**Not covered (from the original list of 10), and why:**
-- **9. Metastability injection** — not a functional-sim concern; this needs gate-level/SDF timing simulation or static MTBF analysis on the synchronizer flops, since metastability is a physical/timing phenomenon, not a logic bug.
-- **10. Almost-full/almost-empty threshold accuracy** — doesn't apply yet, since your current design doesn't implement programmable almost-full/almost-empty flags. Worth revisiting once you add that logic, since threshold correctness there needs to account for synchronizer lag explicitly (a naive comparison would be off by the sync latency).
